@@ -1,95 +1,130 @@
-# Лабораторная работа 8
+# Flow Adapters (STL. Адаптеры)
 
-STL. Адаптеры.
+Библиотека адаптеров данных на C++ для декларативной, потоковой и ленивой обработки контейнеров, алгоритмов и файлов через конвейерный оператор `|` (pipe syntax).
 
-## Задача
+Библиотека реализует функциональный стиль потоковой обработки данных без использования `<ranges>`, с соблюдением требования константного расхода памяти $O(1)$ для всех ленивых адаптеров (за исключением аккумулирующих: `AggregateByKey` и `Join`).
 
-Вам предстоит разработать библиотеку адаптеров для упрощенной работы с алгоритмами, контейнерами и файлами.
-Обобщенный подход к алгоритмам и итераторам позволяет более элегантно решать типовые задачи.
+---
 
-Например, код для решения задачи нахождения частотности слов среди всех текстовых файлов директории может выглядеть следующим образом:
+## Возможности и реализованные адаптеры
 
-```cpp
-Dir(argv[1], recursive) 
-    | Filter([](std::filesystem::path& p){ return p.extension() == ".txt"; })
-    | OpenFiles()
-    | Split("\n ,.;")
-    | Transform(
-        [](std::string& token) { 
-            std::transform(token.begin(), token.end(), token.begin(), [](char c){return std::tolower(c);});
-            return token;
-        })
-    | AggregateByKey(
-        0uz, 
-        [](const std::string&, size_t& count) { ++count;},
-        [](const std::string& token) { return token;}
-      )
-    | Transform([](const std::pair<std::string, size_t>& stat) { return std::format("{} - {}", stat.first, stat.second);})
-    | Out(std::cout);
+### Источники данных (Sources / Generators)
+- **`Dir(path, recursive = false)`** — обход директории (и опционально рекурсивный обход поддиректорий) с генерацией путей `std::filesystem::path`.
+- **`AsDataFlow(container)`** — преобразование STL-контейнера в ленивый поток данных.
+
+### Ленивые адаптеры ($O(1)$ по дополнительной памяти)
+- **`OpenFiles()`** — открытие файловых потоков (`std::ifstream`) для каждого переданного пути.
+- **`Split(delimiters)`** — разбиение текстового потока на токены по набору символов-разделителей.
+- **`Filter(predicate)`** — ленивая фильтрация элементов по предикату.
+- **`Transform(func)`** — преобразование каждого элемента входной последовательности.
+- **`DropNullopt()`** — отсеивание `std::nullopt` из потока `std::optional<T>`.
+- **`SplitExpected(on_success, on_unexpected)`** — разделение потока `std::expected<T, E>` на два конвейера обработки (для ожидаемых значений и ошибок).
+
+### Агрегации и объединения
+- **`AggregateByKey(init_val, aggregator, key_extractor)`** — неленивая агрегация значений по заданному ключу.
+- **`Join(other_flow, key_extractor)`** — объединение двух потоков данных по ключу (аналог SQL `LEFT JOIN`).
+- **`KV`** / **`JoinResult`** — структуры для пар «ключ-значение» и результатов объединения.
+
+### Терминальные операции (Sinks)
+- **`Out(stream)`** — потоковый вывод элементов в `std::ostream`.
+- **`Write(stream, delimiter)`** — запись элементов в поток с разделителем между ними.
+- **`AsVector()`** — материализация ленивого потока в `std::vector<T>`.
+
+---
+
+## Структура проекта
+
+```text
+flow_adapters/
+├── bin/                      # Пример использования / точка входа
+│   ├── CMakeLists.txt
+│   └── main.cpp
+├── lib/                      # Заголовочные файлы библиотеки
+│   └── processing.h          # Реализация адаптеров и оператора |
+├── tests/                    # Юнит-тесты на Google Test
+│   ├── CMakeLists.txt
+│   ├── coverage.cmake        # Конфигурация расчета покрытия кода
+│   ├── aggregate_by_key_ut.cpp
+│   ├── drop_nullopt_ut.cpp
+│   ├── filter_ut.cpp
+│   ├── flow_convertions_ut.cpp
+│   ├── join_ut.cpp
+│   ├── split_expected_ut.cpp
+│   ├── split_ut.cpp
+│   ├── transform_ut.cpp
+│   └── write_ut.cpp
+├── example_texts/            # Пример текстовых данных
+│   └── sample.txt
+└── CMakeLists.txt
 ```
 
-Еще одним значимым отличием такого подхода от классических является то, что вычисления могут быть [ленивыми](https://ru.wikipedia.org/wiki/%D0%9B%D0%B5%D0%BD%D0%B8%D0%B2%D1%8B%D0%B5_%D0%B2%D1%8B%D1%87%D0%B8%D1%81%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F), а создаваемые объекты не владеют массивом данных для решения данной задачи. Подобный подход, в частности, применяется в классах [std::string_view](https://en.cppreference.com/w/cpp/string/basic_string_view) и [std::span](https://en.cppreference.com/w/cpp/container/span)
+---
 
-### Требуемые адаптеры
+## Пример использования
 
-* Dir       - берет все файлы в директории (и рекурсивно по всем поддиректориям)
-* OpenFiles - открывает файловый поток для каждого пути из предыдущего адаптера
-* Split      - делит входной поток по списку делимитеров, передаваемых через аргументы
-* Out       - выводит данные в выходной поток
-* AsDataFlow - преобразует контейнер в поток данных для дальнейшей обработки
-* Transform - изменяет значения элементов наподобие того, как это делает алгоритм transform, применяя заданную функцию к каждому элементу
-* Filter    - фильтрация по определенному признаку, признак передается в качестве аргумента
-* Write     - проходится по всем элементам входного диапазона и записывает их в указанный поток вывода, вставляя между элементами заданный разделитель
-* AsVector  - собирает результаты обработки в вектор
-* Join      - объединяет два потока данных по ключу, аналогично операции LEFT JOIN в SQL
-* KV        - структура "ключ-значение", используемая для операций объединения
-* JoinResult - результат операции объединения, содержащий данные из обоих потоков
-* DropNullopt - фильтрует `std::optional<T>` поток от `std::nullopt` значений
-* SplitExpected - в случае, если предыдущий адаптер возвращает expected, позволяет разделить пайплайн обработки на 2: для ожидаемых и неожидаемых результатов.
-* AggregateByKey - агрегация значений относительно соответствующего ключа. Значение, соответствующее ключу, обновляется через переданный функциональный объект -- агрегатор. Выполняется **не лениво** 
-    * Пример:
-        ```cpp
-        aggregator := 
-        [int value{}](char c) { 
-            value++; 
-            return value; 
-        }
-        [ a, b, c, d, a, a, b, d ] -> [ (a, 3), (b, 2), (c,1), (d,2) ]
-        ```
+Подсчет частотности слов среди всех текстовых файлов в директории:
 
-Требование по памяти ко всем адаптерам, кроме AggregateByKey и Join - константа.
+```cpp
+#include "processing.h"
+#include <iostream>
+#include <filesystem>
+#include <algorithm>
+#include <format>
 
-## Тесты
+using namespace flow;
 
-Все вышеуказанные сущности должны быть покрыты тестами с помощью фреймворка [Google Test](http://google.github.io/googletest). Часть тестов уже написана.
+int main(int argc, char* argv[]) {
+    if (argc < 2) return 1;
 
-## NB
+    Dir(argv[1], /*recursive=*/true)
+        | Filter([](const std::filesystem::path& p) {
+            return p.extension() == ".txt";
+          })
+        | OpenFiles()
+        | Split("\n ,.;")
+        | Transform([](std::string token) {
+            std::transform(token.begin(), token.end(), token.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+            return token;
+          })
+        | AggregateByKey(
+            0uz,
+            [](const std::string&, size_t& count) { ++count; },
+            [](const std::string& token) { return token; }
+          )
+        | Transform([](const auto& stat) {
+            return std::format("{} - {}", stat.first, stat.second);
+          })
+        | Out(std::cout);
 
-1. При реализации классов для их использования в `range-based for`, они должны удовлетворять ряду [требований](https://en.cppreference.com/w/cpp/language/range-for).
+    return 0;
+}
+```
 
-2. Решаемая вами задача похожа на библиотеку std::ranges. Ее использование в данной работе запрещено, однако вы можете с ней ознакомиться и подчеркнуть ряд идей вашей реализации
+---
 
-3. Подумайте как переписать 1ю лабораторную работу прошлого семестра c помощью полученной библиотеки
+## Сборка и тестирование
 
-## Список тем Теормина
+### Требования
+- Компилятор с поддержкой **C++20** (или выше)
+- **CMake** версии 3.16+
+- **Google Test** (загружается автоматически через CMake `FetchContent`)
 
-- Лямбды
-- Type erasure
-- std::function
-- Указатели на:
-    - Функции
-    - Методы
-    - Поля
+### Сборка
 
+```bash
+cmake -B build -S .
+cmake --build build
+```
 
-## Deadline
+### Запуск тестов
 
-| Deadline | Date | Coeff | Branch      |
-|-----------|-----------------|--------|-------------|
-| 0         | 07.04.26 23:59  | 1.0    | deadline_0  |
-| 1         | 14.04.26 23:59  | 0.8    | deadline_1  |
-| 2         | 21.04.26 23:59  | 0.65   | deadline_2  |
-| 3         | 28.04.26 00:00  | 0.5    | deadline_3  |
+```bash
+ctest --test-dir build --output-on-failure
+```
 
-**Максимальное количество баллов — 12**
-
+Или запуск конкретного теста:
+```bash
+./build/tests/aggregate_by_key_ut
+./build/tests/split_expected_ut
+```

@@ -1,0 +1,59 @@
+# Сборка CMake и артефакты компиляции
+build/
+cmake-build-*/
+out/
+bin/
+lib/
+*.o
+*.obj
+*.so
+*.dylib
+*.a
+*.dll
+*.exe
+*.out
+
+# Файлы конфигурации CMake при локальной сборке
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.ninja
+.ninja_*
+compile_commands.json
+CTestTestfile.cmake
+
+# Google Test FetchContent артефакты
+_deps/
+googletest-build/
+googletest-src/
+googletest-subbuild/
+
+# Покрытие кода (gcov, lcov)
+*.gcda
+*.gcno
+*.gcov
+coverage/
+*.info
+coverage.xml
+
+# IDE и текстовые редакторы
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+*.suo
+*.user
+
+# macOS и временные файлы ОС
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+__MACOSX/
+ehthumbs.db
+Thumbs.db
